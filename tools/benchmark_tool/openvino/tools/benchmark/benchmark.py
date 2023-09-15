@@ -3,6 +3,7 @@
 
 import os
 from datetime import datetime
+import time
 from math import ceil
 from openvino.runtime import Core, get_version, AsyncInferQueue
 
@@ -15,7 +16,7 @@ def percentile(values, percent):
 
 class Benchmark:
     def __init__(self, device: str, number_infer_requests: int = 0, number_iterations: int = None,
-                 duration_seconds: int = None, api_type: str = 'async', inference_only = None):
+                 duration_seconds: int = None, api_type: str = 'async', inference_only = None, target_fps = None):
         self.device = device
         self.core = Core()
         self.nireq = number_infer_requests if api_type == 'async' else 1
@@ -24,6 +25,7 @@ class Benchmark:
         self.api_type = api_type
         self.inference_only = inference_only
         self.latency_groups = []
+        self.target_fps = target_fps
 
     def __del__(self):
         del self.core
@@ -88,14 +90,21 @@ class Benchmark:
         iteration = 0
         times = []
         start_time = datetime.utcnow()
+        time_per_inference = 1.0 / self.target_fps if self.target_fps else None
+
         while (self.niter and iteration < self.niter) or \
               (self.duration_seconds and exec_time < self.duration_seconds):
+            iteration_start_time = datetime.utcnow()
             if self.inference_only == False:
                 request.set_input_tensors(data_queue.get_next_input())
             request.infer()
             times.append(request.latency)
             iteration += 1
 
+            if time_per_inference:
+                iteration_duration = (datetime.utcnow() - iteration_start_time).total_seconds()
+                if iteration_duration < time_per_inference:
+                    time.sleep(time_per_inference - iteration_duration)
             exec_time = (datetime.utcnow() - start_time).total_seconds()
         total_duration_sec = (datetime.utcnow() - start_time).total_seconds()
         return sorted(times), total_duration_sec, iteration
@@ -106,9 +115,12 @@ class Benchmark:
         times = []
         in_fly = set()
         start_time = datetime.utcnow()
+        time_per_inference = 1.0 / self.target_fps if self.target_fps else None
+
         while (self.niter and iteration < self.niter) or \
               (self.duration_seconds and exec_time < self.duration_seconds) or \
               (iteration % self.nireq):
+            iteration_start_time = datetime.utcnow()
             idle_id = infer_queue.get_idle_request_id()
             if idle_id in in_fly:
                 times.append(infer_queue[idle_id].latency)
@@ -116,6 +128,11 @@ class Benchmark:
                 in_fly.add(idle_id)
             infer_queue.start_async()
             iteration += 1
+            
+            if time_per_inference:
+                iteration_duration = (datetime.utcnow() - iteration_start_time).total_seconds()
+                if iteration_duration < time_per_inference:
+                    time.sleep(time_per_inference - iteration_duration)
 
             exec_time = (datetime.utcnow() - start_time).total_seconds()
         infer_queue.wait_all()
@@ -131,10 +148,12 @@ class Benchmark:
         times = []
         num_groups = len(self.latency_groups)
         start_time = datetime.utcnow()
+        time_per_inference = 1.0 / self.target_fps if self.target_fps else None
         in_fly = set()
         while (self.niter and iteration < self.niter) or \
               (self.duration_seconds and exec_time < self.duration_seconds) or \
               (iteration % num_groups):
+            iteration_start_time = datetime.utcnow()
             processed_frames += data_queue.get_next_batch_size()
             idle_id = infer_queue.get_idle_request_id()
             if idle_id in in_fly:
@@ -147,6 +166,11 @@ class Benchmark:
             infer_queue[idle_id].set_input_tensors(data_queue.get_next_input())
             infer_queue.start_async(userdata=group_id)
             iteration += 1
+
+            if time_per_inference:
+                iteration_duration = (datetime.utcnow() - iteration_start_time).total_seconds()
+                if iteration_duration < time_per_inference:
+                    time.sleep(time_per_inference - iteration_duration)
 
             exec_time = (datetime.utcnow() - start_time).total_seconds()
         infer_queue.wait_all()

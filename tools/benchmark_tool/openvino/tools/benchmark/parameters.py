@@ -72,6 +72,7 @@ def parse_args():
                            'If not specified, the number of iterations is calculated depending on a device.')
     args.add_argument('-t', '--time', type=check_positive, required=False, default=None,
                       help='Optional. Time in seconds to execute topology.')
+    args.add_argument('-fps', '--target_fps', type=int, required=False, default=None, help='Optional. Specify a target FPS value.')
 
     shapes = parser.add_argument_group('Input shapes')
     shapes.add_argument('-b', '--batch_size', type=str, required=False, default='',
